@@ -47,12 +47,6 @@ impl PacEntry {
     } 
 }
 
-impl std::fmt::Display for PacEntry {    
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:<8}{:<32}{}", self.file.size(),  *self.file, self.name().unwrap())
-    }
-}
-
 #[derive(BinRead)]
 #[br(little)]
 struct PacArc {
@@ -113,16 +107,6 @@ impl PacFile {
     }
 }
 
-impl std::fmt::Display for PacFile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PacFile::Bmz { uncompressed_size, .. } =>
-                write!(f, "{:<8}{uncompressed_size:<8}", "bmz"),
-            PacFile::Other { .. } => write!(f, "{:<8}", "other"),
-        }
-    }
-}
-
 /// Utility for extracting and packing pac archives of ひぐらしのなく頃に礼　デスクトップアクセサリー
 /// (higurashi no naku koro ni screen buddy)
 #[derive(Parser)]
@@ -135,6 +119,12 @@ enum Commands {
         /// out folder, will be created if not exists, all contents will be REMOVED if exists
         out_dir: String,
     },
+    #[clap(visible_alias = "l")]
+    /// List all files in archive
+    List {
+        /// .pac archive
+        arc: String,
+    }
     // Pack,
 }
 
@@ -156,6 +146,26 @@ fn main() -> Result<()> {
             DirBuilder::new().create(path)?;
             arc.extract_all(&out_dir)?;
             println!("All files extracted successfully");
+        },
+        Commands::List { arc } => {
+            let mut f = File::open(arc)?;
+            let arc = PacArc::read(&mut f)?;
+
+            println!("{:<6}{:<10}{:<48}{}", "index", "size", "info", "name");
+            for (idx, entry) in arc.entries.iter().enumerate() {
+                let info = match &*entry.file {
+                    PacFile::Bmz { uncompressed_size, .. } =>
+                        format!("bmz uncompressed size: {uncompressed_size}"),
+                    PacFile::Other { .. } =>  "other file".into(),
+                };
+
+                let name = match entry.name() {
+                    Ok(n) => n,
+                    Err(e) => e.to_string(),
+                };
+
+                println!("{idx:<6}{:<10}{info:<48}{name}", entry.file.size(), );
+            }
         },
     }
 
