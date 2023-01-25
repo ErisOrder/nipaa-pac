@@ -1,23 +1,23 @@
 use binrw::{
     BinRead, NullString, FilePtr32,
 };
-
-use std::io::SeekFrom;
-use std::fs::File;
-use std::env::args;
-use anyhow::Result;
+use clap::Parser;
+use std::path::Path;
+use std::{io::SeekFrom, fs::DirBuilder};
+use std::fs::{File, remove_dir_all};
+use anyhow::{Result, bail};
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 use encoding_rs::SHIFT_JIS;
 
-#[derive(BinRead)]
-#[br(little)]
 /// Real layout:
 /// ```
 /// ptr: u32,
 /// size: u32,
 /// name: [u8; 56]
 /// ```
+#[derive(BinRead)]
+#[br(little)]
 struct PacEntry {
     #[br(seek_before = SeekFrom::Current(4))]
     pub size: u32,
@@ -29,18 +29,20 @@ struct PacEntry {
 
 
 impl PacEntry {
-    pub fn name(&self) -> Option<String> {
+    /// Try to get file name
+    pub fn name(&self) -> Result<String> {
         match SHIFT_JIS.decode(&self.name) {
-            (cow, _, false) => Some(cow.to_string()),
-            (_, _, true) => None
+            (cow, _, false) => Ok(cow.to_string()),
+            (cow, _, true) => bail!("failed to normally decode string: {cow}")
         }
     }
 
-    pub fn data(&self) -> Result<Vec<u8>> {
+    /// Get converted data
+    pub fn converted_data(&self) -> Result<Vec<u8>> {
         if let Some(data) = &self.file.value {
-            Ok(data.converted_data())
+            data.converted_data()
         } else {
-            todo!()
+            bail!("no file data")
         }
     } 
 }
@@ -64,7 +66,7 @@ impl PacArc {
     pub fn extract_all(&self, out_dir: &str) -> Result<()> {
         for entry in self.entries.iter() {
             let path = format!("{out_dir}/{}", entry.name().unwrap());
-            std::fs::write(path, entry.data().expect("failed to get data"))?;
+            std::fs::write(path, entry.converted_data().expect("failed to get data"))?;
         }   
         Ok(()) 
     } 
@@ -87,18 +89,22 @@ enum PacFile {
 }
 
 impl PacFile {
-    const BMZ_HEADER_SIZE: usize = 5;
-    
-    pub fn converted_data(&self) -> Vec<u8> {
+    const BMZ_HEADER_SIZE: usize = 8;
+
+    /// Get converted data
+    pub fn converted_data(&self) -> Result<Vec<u8>> {
         match self {
             PacFile::Bmz { compressed_data, .. } => {
-                // inflate_bytes(compressed_data).expect("failed to decompress bmz")
-                decompress_to_vec_zlib(compressed_data).unwrap()
+                match decompress_to_vec_zlib(compressed_data) {
+                    Ok(data) => Ok(data),
+                    Err(e) => bail!(e),
+                }
             },
-            PacFile::Other { data } => data.clone(),
+            PacFile::Other { data } => Ok(data.clone()),
         }
     }
 
+    // Get file size
     pub fn size(&self) -> usize {
         match self {
             PacFile::Bmz { compressed_data, .. } => compressed_data.len() + Self::BMZ_HEADER_SIZE,
@@ -117,19 +123,41 @@ impl std::fmt::Display for PacFile {
     }
 }
 
-fn main() {
-    let arc_name = args().nth(1).expect("Expected Arc name");
-    let arc_out = args().nth(2).expect("Expected out dir");
+/// Utility for extracting and packing pac archives of ひぐらしのなく頃に礼　デスクトップアクセサリー
+/// (higurashi no naku koro ni screen buddy)
+#[derive(Parser)]
+enum Commands {
+    /// Extract all files from `arc` to `out_dir`
+    #[clap(visible_alias = "x")]
+    Extract {
+        /// .pac archive
+        arc: String,
+        /// out folder, will be created if not exists, all contents will be REMOVED if exists
+        out_dir: String,
+    },
+    // Pack,
+}
 
-    let mut f = File::open(arc_name).unwrap();
+fn main() -> Result<()> {
+    let args = Commands::parse();
 
-    let arc = PacArc::read(&mut f).unwrap();
+    match args {
+        Commands::Extract { arc, out_dir } => {
+            let mut f = File::open(arc)?;
+            let arc = PacArc::read(&mut f)?;
 
-    for (idx, entry) in arc.entries.iter().enumerate() {
-        println!("{idx:<3}: {entry}")
+            let path = Path::new(&out_dir);
+            match (path.exists(), path.is_dir()) {
+                (true, true) => remove_dir_all(path)?,
+                (true, false) => bail!("specified path is not a directory"),
+                _ => (),
+            }
+
+            DirBuilder::new().create(path)?;
+            arc.extract_all(&out_dir)?;
+            println!("All files extracted successfully");
+        },
     }
 
-    std::fs::DirBuilder::new().create(&arc_out).unwrap();
-
-    arc.extract_all(&arc_out).expect("Failed to extract");
+    Ok(())
 }

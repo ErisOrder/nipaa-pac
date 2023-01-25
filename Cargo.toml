@@ -1,5 +1,5 @@
 [package]
-name = "nipaa-r"
+name = "nipaa-pac"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,6 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.68"
 binrw = "0.10.0"
-dylib-mitm = { git = "https://github.com/nikvoid/dylib-mitm", version = "0.1.0" }
+clap = { version = "4.1.4", features = ["derive"] }
 encoding_rs = "0.8.31"
 miniz_oxide = "0.6.2"
