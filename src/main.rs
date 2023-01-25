@@ -5,7 +5,7 @@ use clap::Parser;
 use std::path::Path;
 use std::{io::SeekFrom, fs::DirBuilder};
 use std::fs::{File, remove_dir_all};
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, Context};
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 use encoding_rs::SHIFT_JIS;
@@ -36,15 +36,6 @@ impl PacEntry {
             (cow, _, true) => bail!("failed to normally decode string: {cow}")
         }
     }
-
-    /// Get converted data
-    pub fn converted_data(&self) -> Result<Vec<u8>> {
-        if let Some(data) = &self.file.value {
-            data.converted_data()
-        } else {
-            bail!("no file data")
-        }
-    } 
 }
 
 #[derive(BinRead)]
@@ -57,10 +48,17 @@ struct PacArc {
 }
 
 impl PacArc {
+    /// Extract and convert all files
     pub fn extract_all(&self, out_dir: &str) -> Result<()> {
         for entry in self.entries.iter() {
-            let path = format!("{out_dir}/{}", entry.name().unwrap());
-            std::fs::write(path, entry.converted_data().expect("failed to get data"))?;
+            let path = Path::new(&format!("{out_dir}/x"))
+                .with_file_name(entry.name()?);
+
+            let path = if let Some(ext) = entry.file.converted_ext() {
+                path.with_extension(ext)
+            } else { path };
+
+            std::fs::write(path, entry.file.converted_data().context("Failed to extract {path}")?)?;
         }   
         Ok(()) 
     } 
@@ -98,6 +96,22 @@ impl PacFile {
         }
     }
 
+    /// Get original (packed) extension
+    pub fn original_ext(&self) -> Option<&'static str> {
+        match self {
+            PacFile::Bmz { .. } => Some("bmz"),
+            PacFile::Other { .. } => None,
+        }
+    }
+
+    /// Get converted (extracted) extension
+    pub fn converted_ext(&self) -> Option<&'static str> {
+        match self {
+            PacFile::Bmz { .. } => Some("bmp"),
+            PacFile::Other { .. } => None,
+        }
+    }
+
     // Get file size
     pub fn size(&self) -> usize {
         match self {
@@ -124,8 +138,14 @@ enum Commands {
     List {
         /// .pac archive
         arc: String,
+    },
+    /// Pack directory into archive
+    Pack {
+        /// Result will be saved to this file
+        out_arc: String,
+        /// Build archive from this directory
+        src_dir: String,
     }
-    // Pack,
 }
 
 fn main() -> Result<()> {
@@ -167,6 +187,7 @@ fn main() -> Result<()> {
                 println!("{idx:<6}{:<10}{info:<48}{name}", entry.file.size(), );
             }
         },
+        Commands::Pack { out_arc, src_dir } => todo!(),
     }
 
     Ok(())
