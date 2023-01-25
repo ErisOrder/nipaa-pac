@@ -1,11 +1,12 @@
 use binrw::{
-    BinRead, ReadOptions, BinResult, VecArgs, NullString, until_eof, FilePtr32,
+    BinRead, NullString, FilePtr32,
 };
 
-use std::io::{SeekFrom, Read, Seek};
+use std::io::SeekFrom;
 use std::fs::File;
 use std::env::args;
 use anyhow::Result;
+use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 use encoding_rs::SHIFT_JIS;
 
@@ -20,9 +21,9 @@ use encoding_rs::SHIFT_JIS;
 struct PacEntry {
     #[br(seek_before = SeekFrom::Current(4))]
     pub size: u32,
-    #[br(seek_before = SeekFrom::Current(-4), args(size), err_context("size = {size}"))]
-    pub ptr: FilePtr32<PacFile>,
-    #[br(pad_size_to = 56)]
+    #[br(seek_before = SeekFrom::Current(-8), args(size), err_context("size = {size}"))]
+    pub file: FilePtr32<PacFile>,
+    #[br(seek_before = SeekFrom::Current(4), pad_size_to = 56)]
     pub name: NullString,
 }
 
@@ -36,9 +37,7 @@ impl PacEntry {
     }
 
     pub fn data(&self) -> Result<Vec<u8>> {
-        // println!("data: {}", self.data.inner.len());
-        // Ok(self.data.inner.clone())
-        if let Some(data) = &self.ptr.value {
+        if let Some(data) = &self.file.value {
             Ok(data.converted_data())
         } else {
             todo!()
@@ -46,11 +45,11 @@ impl PacEntry {
     } 
 }
 
-// impl std::fmt::Display for PacEntry {    
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{:<8}{}", self.data.len(), self.name().unwrap())
-//     }
-// }
+impl std::fmt::Display for PacEntry {    
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:<8}{:<32}{}", self.file.size(),  *self.file, self.name().unwrap())
+    }
+}
 
 #[derive(BinRead)]
 #[br(little)]
@@ -74,12 +73,10 @@ impl PacArc {
 #[derive(BinRead)]
 #[br(import(size: u32))]
 enum PacFile {
-    #[br(magic = b"ZLC38")] 
+    #[br(magic = b"ZLC3")] 
     Bmz {
-        file_type_or_id_or_layer: u16,
-        #[br(magic = b"\x00\x78\xDA")]
-        magic2: [u8; 3],
-        #[br(count = size - 5)]
+        uncompressed_size: u32, 
+        #[br(count = size - Self::BMZ_HEADER_SIZE as u32)]
         compressed_data: Vec<u8>,
     },
 
@@ -90,23 +87,35 @@ enum PacFile {
 }
 
 impl PacFile {
+    const BMZ_HEADER_SIZE: usize = 5;
+    
     pub fn converted_data(&self) -> Vec<u8> {
         match self {
-            PacFile::Bmz { compressed_data, .. } => compressed_data.clone(),
+            PacFile::Bmz { compressed_data, .. } => {
+                // inflate_bytes(compressed_data).expect("failed to decompress bmz")
+                decompress_to_vec_zlib(compressed_data).unwrap()
+            },
             PacFile::Other { data } => data.clone(),
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            PacFile::Bmz { compressed_data, .. } => compressed_data.len() + Self::BMZ_HEADER_SIZE,
+            PacFile::Other { data } => data.len(),
         }
     }
 }
 
-// #[derive(BinRead)]
-// #[br(magic = b"ZLC38")]
-// struct BMZFile {
-//     file_type_or_id_or_layer: u16,
-//     #[br(magic = b"\x00\x78\xDA")]
-//     magic2: [u8; 3],
-//     #[br(parse_with = until_eof)]
-//     compressed_data: Vec<u8>,
-// }
+impl std::fmt::Display for PacFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PacFile::Bmz { uncompressed_size, .. } =>
+                write!(f, "{:<8}{uncompressed_size:<8}", "bmz"),
+            PacFile::Other { .. } => write!(f, "{:<8}", "other"),
+        }
+    }
+}
 
 fn main() {
     let arc_name = args().nth(1).expect("Expected Arc name");
@@ -117,7 +126,7 @@ fn main() {
     let arc = PacArc::read(&mut f).unwrap();
 
     for (idx, entry) in arc.entries.iter().enumerate() {
-        // println!("{idx:<3}: {entry}")
+        println!("{idx:<3}: {entry}")
     }
 
     std::fs::DirBuilder::new().create(&arc_out).unwrap();
