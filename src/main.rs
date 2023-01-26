@@ -11,7 +11,8 @@ use miniz_oxide::inflate::decompress_to_vec_zlib;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use encoding_rs::SHIFT_JIS;
 
-use serde::{Deserialize, Serialize};
+mod ttp;
+use ttp::TtpFile;
 
 const ENTRY_NAME_SIZE: usize = 56;
 
@@ -159,33 +160,6 @@ enum PacFile {
         data: Vec<u8>
     }
 }
-
-#[derive(Serialize, Deserialize, BinRead, BinWrite)]
-struct TtpFile {
-    unk: u32,
-    frame_count: u32,
-    window_width: u32,
-    window_height: u32,
-    #[br(count = frame_count)]
-    frames: Vec<TtpFrame>,
-    // unk_bool: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, BinRead, BinWrite)]
-struct TtpFrame {
-    sprite_name: ResName,
-    se_name: ResName,
-    unk_name: ResName,
-    some_vals: [u32; 5],   
-}
-
-#[derive(Serialize, Deserialize, BinRead, BinWrite)]
-struct ResName {
-    len: u32,
-    #[br(count = len)]
-    sj_bytes: Vec<u8>
-}
-
 impl PacFile {
     const BMZ_HEADER_SIZE: usize = 8;
 
