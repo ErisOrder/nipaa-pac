@@ -58,12 +58,15 @@ struct PacArc {
 #[repr(C)]
 struct PacEntryWrite {
     pub offset: u32,
-    #[bw(calc = data.size() as u32)]
     pub size: u32,
     #[bw(pad_size_to = ENTRY_NAME_SIZE)]
     pub name: NullString,
     #[bw(ignore)]
     pub data: PacFile,
+}
+
+impl PacEntryWrite {
+    pub const SIZE: usize = 64;
 }
 
 /// Builder for Pac archives
@@ -92,6 +95,7 @@ impl PacArcBuilder {
             name: NullString(enc_name),
             data: file,
             offset: 0,
+            size: 0,
         };
 
         self.entries.push(e);
@@ -109,13 +113,19 @@ impl PacArcBuilder {
         let mut data_buff = Cursor::new(vec![]);
         
         let mut current_offset = 
-            (std::mem::size_of::<PacEntryWrite>() * self.entries.len() + 4) as u32;
+            (PacEntryWrite::SIZE * self.entries.len() + 4) as u32;
 
         for mut entry in self.entries {
             entry.offset = current_offset;
-            current_offset += entry.data.size() as u32;
-            header_buff.write_le(&entry)?;
+
+            // record size of written entry
+            let current = data_buff.position();
             data_buff.write_le(&entry.data)?;
+            let size = (data_buff.position() - current) as u32;
+            
+            entry.size = size;
+            current_offset += size;
+            header_buff.write_le(&entry)?;
         }
 
         out.write_le(&header_buff.into_inner())?;
@@ -160,6 +170,7 @@ enum PacFile {
         data: Vec<u8>
     }
 }
+
 impl PacFile {
     const BMZ_HEADER_SIZE: usize = 8;
 
@@ -181,7 +192,7 @@ impl PacFile {
     pub fn original_ext(conv_ext: &str) -> &str {
         match conv_ext {
             "bmp" => "bmz",
-            // "json" => "ttp",
+            "json" => "ttp",
             other => other,
         }
     }
@@ -202,19 +213,14 @@ impl PacFile {
         match conv_extension {
             "bmp" => {
                 let uncompressed_size = data.len() as u32;
-                let compressed_data = compress_to_vec_zlib(&data, 10);
+                let compressed_data = compress_to_vec_zlib(&data, 5);
                 Ok(PacFile::Bmz { uncompressed_size, compressed_data })                
+            }
+            "json" => {
+                let ttp: TtpFile = serde_json::from_slice(&data)?;
+                Ok(PacFile::Ttp(ttp))
             } 
             _ => Ok(PacFile::Other { data })
-        }
-    }
-
-    // Get file size
-    pub fn size(&self) -> usize {
-        match self {
-            PacFile::Bmz { compressed_data, .. } => compressed_data.len() + Self::BMZ_HEADER_SIZE,
-            PacFile::Other { data } => data.len(),
-            PacFile::Ttp(_) => todo!(),
         }
     }
 }
@@ -276,8 +282,13 @@ fn main() -> Result<()> {
                     PacFile::Bmz { uncompressed_size, .. } =>
                         format!("bmz uncompressed size: {uncompressed_size}"),
                     PacFile::Other { .. } =>  "other file".into(),
-                    PacFile::Ttp(TtpFile { unk, frame_count: fcnt, window_width: w, window_height: h, .. }) => 
-                        format!("ttp {unk:<3} w: {w:<4} h: {h:<4} frames: {fcnt}"),
+                    PacFile::Ttp(TtpFile {
+                        maybe_ttp_type: typ,
+                        frame_count: fcnt,
+                        window_width: w,
+                        window_height: h,
+                        .. 
+                    }) => format!("ttp type?: {typ:<3} w: {w:<4} h: {h:<4} frames: {fcnt}"),
                 };
 
                 let name = match entry.name() {

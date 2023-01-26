@@ -5,13 +5,14 @@ use encoding_rs::SHIFT_JIS;
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite)]
 pub struct TtpFile {
-    pub unk: u32,
+    pub maybe_ttp_type: u32,
     pub frame_count: u32,
     pub window_width: u32,
     pub window_height: u32,
     #[br(count = frame_count)]
     pub frames: Vec<TtpFrame>,
-    // unk_bool: Option<bool>,
+    #[br(if(maybe_ttp_type == 3))]
+    pub unk_bool: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, BinRead, BinWrite)]
