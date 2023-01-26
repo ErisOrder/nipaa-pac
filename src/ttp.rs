@@ -3,6 +3,7 @@ use binrw::{BinRead, BinWrite};
 
 use encoding_rs::SHIFT_JIS;
 
+/// Encoded animation
 #[derive(Serialize, Deserialize, BinRead, BinWrite)]
 pub struct TtpFile {
     pub maybe_ttp_type: u32,
@@ -15,12 +16,18 @@ pub struct TtpFile {
     pub unk_bool: Option<u8>,
 }
 
+/// Frame of animation
 #[derive(Serialize, Deserialize, BinRead, BinWrite)]
 pub struct TtpFrame {
     pub sprite_name: ResName,
     pub se_name: ResName,
     pub textbox_name: ResName,
-    pub some_vals: [u32; 5],   
+    
+    pub delay_ms: u32,
+    pub x_offset_textbox: u32,
+    pub y_offset_textbox: u32,
+    pub x_offset: u32,
+    pub y_offset: u32,
 }
 
 /// Variable-length SHIFT-JIS-encoded resource name
