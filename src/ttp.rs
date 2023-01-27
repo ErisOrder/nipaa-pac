@@ -12,8 +12,14 @@ pub struct TtpFile {
     pub window_height: u32,
     #[br(count = frame_count)]
     pub frames: Vec<TtpFrame>,
+
+    /// This thing still not fully clear to me.
+    /// I've only discovered so far, that if wakeup clock set to "play 1 time" mode,
+    /// animations that have `true` at this bool will not play sounds.
+    /// 
+    /// P.S. Probably it`s the only purpose of this bool, pretty pointless...
     #[br(if(maybe_ttp_type == 3))]
-    pub unk_bool: Option<u8>,
+    pub onetime_wakeup_dont_play_sound: Option<u8>,
 }
 
 /// Frame of animation
